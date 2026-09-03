@@ -1,0 +1,2 @@
+rootProject.name = "Painel TV Indoor"
+include ':app'
