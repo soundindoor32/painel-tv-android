@@ -1,10 +1,12 @@
 package com.soundindoor.paineltv
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.os.Bundle
 import android.os.PowerManager
 import android.view.View
 import android.view.WindowManager
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -15,15 +17,21 @@ import androidx.appcompat.app.AppCompatActivity
  * Tela única do app: uma WebView mostra o painel de verdade (o mesmo site que já
  * roda no navegador — clima, avisos, notícias, comerciais em imagem E vídeo).
  *
- * Essa é a versão mais simples possível: sem nenhum player nativo separado (nem
- * ExoPlayer, nem MediaPlayer/VideoView) — o vídeo toca direto pela tag <video> do
- * HTML, exatamente como já funciona perfeito no Chrome do computador. A WebView do
- * Android usa o mesmo motor (Chromium) que o Chrome.
+ * IMPORTANTE: o app NÃO tem mais nenhum código de TV fixo. Ele sempre aponta pra
+ * página de pareamento (/tv/parear), e é essa própria página quem decide, na hora,
+ * se já existe um pareamento salvo ou se precisa mostrar o QR Code/código.
+ *
+ * O pareamento é guardado usando SharedPreferences (armazenamento NATIVO do
+ * Android) em vez do localStorage da WebView — isso porque, em testes reais, o
+ * armazenamento da WebView se mostrou inconsistente em alguns aparelhos (nem
+ * sempre é limpo direito ao desinstalar o app). SharedPreferences é sempre
+ * limpo pelo próprio Android ao desinstalar, sem exceção, em qualquer aparelho.
  */
 class MainActivity : AppCompatActivity() {
 
-    // TROQUE AQUI pela URL real da sua TV, se quiser fixar direto no app.
-    private val urlPadraoDaTv = "https://soundindoor.duckdns.org/tv/parear"
+    private val urlBaseDoSistema = "https://soundindoor.duckdns.org"
+    private val nomeArquivoPreferencias = "soundindoor_prefs"
+    private val chaveCodigoTv = "codigo_tv_pareado"
 
     private lateinit var webView: WebView
     private var wakeLock: PowerManager.WakeLock? = null
@@ -41,7 +49,29 @@ class MainActivity : AppCompatActivity() {
 
         webView = findViewById(R.id.webView)
         configurarWebView()
-        webView.loadUrl(urlPadraoDaTv)
+        carregarUrlCorreta()
+    }
+
+    // Decide sozinho qual URL abrir: se já tem um código de TV salvo de um
+    // pareamento anterior, vai direto pra ele; senão, mostra a tela de pareamento.
+    private fun carregarUrlCorreta() {
+        val prefs = getSharedPreferences(nomeArquivoPreferencias, Context.MODE_PRIVATE)
+        val codigoSalvo = prefs.getString(chaveCodigoTv, null)
+        if (codigoSalvo != null) {
+            webView.loadUrl("$urlBaseDoSistema/tv/$codigoSalvo")
+        } else {
+            webView.loadUrl("$urlBaseDoSistema/tv/parear")
+        }
+    }
+
+    // Ponte chamada PELA PRÓPRIA PÁGINA WEB (parear.html) assim que o pareamento
+    // é confirmado — window.AppSoundIndoor.salvarCodigoTv(codigo) no JavaScript.
+    inner class PonteParaAndroid {
+        @JavascriptInterface
+        fun salvarCodigoTv(codigo: String) {
+            val prefs = getSharedPreferences(nomeArquivoPreferencias, Context.MODE_PRIVATE)
+            prefs.edit().putString(chaveCodigoTv, codigo).apply()
+        }
     }
 
     private fun configurarWebView() {
@@ -54,6 +84,8 @@ class MainActivity : AppCompatActivity() {
         configuracoes.useWideViewPort = true
         configuracoes.loadWithOverviewMode = true
         webView.setInitialScale(0)
+        // é isso que cria o "window.AppSoundIndoor" que o parear.html chama
+        webView.addJavascriptInterface(PonteParaAndroid(), "AppSoundIndoor")
 
         webView.webViewClient = object : WebViewClient() {
             override fun onReceivedError(view: WebView?, errorCode: Int, description: String?, failingUrl: String?) {
