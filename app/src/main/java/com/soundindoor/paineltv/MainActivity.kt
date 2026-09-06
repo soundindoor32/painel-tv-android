@@ -23,7 +23,7 @@ import androidx.appcompat.app.AppCompatActivity
 class MainActivity : AppCompatActivity() {
 
     // TROQUE AQUI pela URL real da sua TV, se quiser fixar direto no app.
-    private val urlPadraoDaTv = "https://soundindoor.duckdns.org/tv/98629c41a9fc7605d52c0b66"
+    private val urlPadraoDaTv = "https://soundindoor.duckdns.org/tv/parear"
 
     private lateinit var webView: WebView
     private var wakeLock: PowerManager.WakeLock? = null
