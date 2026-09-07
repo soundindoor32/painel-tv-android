@@ -72,6 +72,16 @@ class MainActivity : AppCompatActivity() {
             val prefs = getSharedPreferences(nomeArquivoPreferencias, Context.MODE_PRIVATE)
             prefs.edit().putString(chaveCodigoTv, codigo).apply()
         }
+
+        // Chamado quando o dono desconecta essa tela pelo painel (em tempo real,
+        // via socket, ou pelo heartbeat) — sem isso, o app "lembrava" nativamente
+        // do código antigo e pulava direto pro conteúdo de novo no próximo launch,
+        // mesmo depois de já ter sido desconectado.
+        @JavascriptInterface
+        fun limparCodigoTv() {
+            val prefs = getSharedPreferences(nomeArquivoPreferencias, Context.MODE_PRIVATE)
+            prefs.edit().remove(chaveCodigoTv).apply()
+        }
     }
 
     private fun configurarWebView() {
