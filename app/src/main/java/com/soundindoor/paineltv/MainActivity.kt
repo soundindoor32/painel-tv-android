@@ -4,10 +4,16 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Bundle
 import android.os.PowerManager
+import android.util.Log
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -85,25 +91,101 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun configurarWebView() {
+        // habilita inspeção remota via Chrome DevTools (chrome://inspect, com o
+        // aparelho ligado por USB/ADB) — sem isso, um problema como a "tela
+        // branca" fica impossível de diagnosticar de verdade, porque não tinha
+        // como ver o que estava acontecendo dentro da WebView
+        WebView.setWebContentsDebuggingEnabled(true)
+
         val configuracoes: WebSettings = webView.settings
         configuracoes.javaScriptEnabled = true
         configuracoes.domStorageEnabled = true
         configuracoes.mediaPlaybackRequiresUserGesture = false
         configuracoes.cacheMode = WebSettings.LOAD_DEFAULT
         configuracoes.setSupportZoom(false)
-        configuracoes.useWideViewPort = true
-        configuracoes.loadWithOverviewMode = true
-        webView.setInitialScale(0)
+        // acrescenta um identificador ao User-Agent — o próprio site (tv-boot.js)
+        // usa isso pra saber se está rodando dentro do app (em vez de um navegador
+        // comum) e aplicar ajustes específicos. Sem isso, o app nunca era
+        // reconhecido como "app de verdade" pelo lado do site.
+        configuracoes.userAgentString = configuracoes.userAgentString + " PainelTVAndroidApp"
+        // useWideViewPort/loadWithOverviewMode servem pra "encolher" sites feitos
+        // pra computador (largura fixa) até caberem numa tela pequena — mas a
+        // página do painel já é responsiva de verdade (usa vh/vw e já declara
+        // <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        // no próprio HTML). Em alguns aparelhos com densidade de tela incomum,
+        // essa combinação fazia o conteúdo renderizar pequeno, grudado num canto —
+        // removendo essas duas opções, a WebView respeita só a meta tag da própria
+        // página, que já está correta.
         // é isso que cria o "window.AppSoundIndoor" que o parear.html chama
         webView.addJavascriptInterface(PonteParaAndroid(), "AppSoundIndoor")
 
         webView.webViewClient = object : WebViewClient() {
-            override fun onReceivedError(view: WebView?, errorCode: Int, description: String?, failingUrl: String?) {
-                super.onReceivedError(view, errorCode, description, failingUrl)
-                webView.postDelayed({ webView.reload() }, 5000)
+            // Usa a versão do onReceivedError que recebe a REQUISIÇÃO (não só a
+            // URL) — isso permite saber se o erro foi no DOCUMENTO PRINCIPAL ou
+            // num recurso secundário qualquer (uma fonte do Google Fonts, um
+            // ícone, etc). Antes, QUALQUER erro (até de recurso secundário)
+            // disparava um recarregamento da página inteira — o que podia virar
+            // um ciclo de recarregar sem parar se, por exemplo, só a fonte
+            // estivesse indisponível, sem nada de errado com o painel em si.
+            override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
+                super.onReceivedError(view, request, error)
+                val eDocumentoPrincipal = request?.isForMainFrame ?: true
+                Log.e("SoundIndoorWebView", "onReceivedError: ${error?.description} (código ${error?.errorCode}, url: ${request?.url}, documento principal: $eDocumentoPrincipal)")
+                if(eDocumentoPrincipal){
+                    webView.postDelayed({ webView.reload() }, 5000)
+                }
+            }
+
+            // Em aparelhos mais fracos, o processo de renderização da WebView
+            // (que roda separado do app) pode ser encerrado pelo sistema por
+            // falta de memória/GPU — sem tratar isso, a tela simplesmente fica
+            // congelada/branca pra sempre, porque o app nem percebe que o
+            // renderizador morreu. Só dar reload() na MESMA instância de WebView
+            // não é seguro depois desse evento (o processo dela já morreu) — o
+            // certo é descartar essa WebView e criar uma nova do zero.
+            override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+                Log.e("SoundIndoorWebView", "Renderizador da WebView morreu (crash: ${detail?.didCrash()}, prioridade: ${detail?.rendererPriorityAtExit()}) — recriando a WebView do zero.")
+                recriarWebViewAposCrash()
+                return true // avisa o Android que já tratamos o problema, não deixa ele derrubar o app inteiro
             }
         }
-        webView.webChromeClient = WebChromeClient()
+
+        webView.webChromeClient = object : WebChromeClient() {
+            // manda todo log do console JavaScript (inclusive erros) pro logcat
+            // do Android — antes disso, um erro tipo "Cannot read properties of
+            // null" na rotação dos painéis simplesmente desaparecia sem deixar
+            // rastro nenhum, e a tela ficava branca sem explicação visível.
+            override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                Log.e(
+                    "SoundIndoorWebView",
+                    "${consoleMessage?.message()} (${consoleMessage?.sourceId()}:${consoleMessage?.lineNumber()})"
+                )
+                return true
+            }
+        }
+    }
+
+    // Depois que o processo de renderização morre, a WebView antiga não serve
+    // mais — precisa sair da tela, ser destruída, e uma NOVA WebView entrar no
+    // lugar dela (mesma posição na hierarquia de telas, mesmo tamanho). Não
+    // precisamos saber os detalhes do layout XML: pegamos essas informações da
+    // própria WebView antiga, ANTES de destruí-la.
+    private fun recriarWebViewAposCrash() {
+        val parent = webView.parent as? ViewGroup
+        val layoutParams = webView.layoutParams
+        val posicaoNaTela = parent?.indexOfChild(webView) ?: -1
+
+        parent?.removeView(webView)
+        webView.destroy()
+
+        webView = WebView(this)
+        webView.layoutParams = layoutParams
+        if (parent != null) {
+            if (posicaoNaTela >= 0) parent.addView(webView, posicaoNaTela) else parent.addView(webView)
+        }
+
+        configurarWebView()
+        carregarUrlCorreta()
     }
 
     private fun ativarTelaCheiaImersiva() {
