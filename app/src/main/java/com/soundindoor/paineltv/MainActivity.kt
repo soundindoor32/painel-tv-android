@@ -2,11 +2,14 @@ package com.soundindoor.paineltv
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
@@ -189,14 +192,30 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun ativarTelaCheiaImersiva() {
-        window.decorView.systemUiVisibility = (
-            View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-            or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-            or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-            or View.SYSTEM_UI_FLAG_FULLSCREEN
-            or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-        )
+        // A partir do Android 11 (API 30), o jeito CORRETO e mais confiável de
+        // esconder as barras de sistema é o WindowInsetsController — as flags
+        // antigas (SYSTEM_UI_FLAG_*) são descontinuadas, e em alguns firmwares
+        // genéricos de TV Box mais simples elas podem não esconder a barra de
+        // verdade, fazendo a WebView calcular um espaço disponível MENOR que a
+        // tela real (efeito de "conteúdo encolhido"). Mantém as flags antigas
+        // só como reserva pra Android mais velho, que não tem a API nova.
+        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R){
+            window.setDecorFitsSystemWindows(false)
+            window.insetsController?.let { controlador ->
+                controlador.hide(WindowInsets.Type.systemBars())
+                controlador.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = (
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            )
+        }
     }
 
     private fun manterTelaLigada() {
