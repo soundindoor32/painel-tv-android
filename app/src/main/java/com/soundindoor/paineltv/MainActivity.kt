@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
 import android.view.View
@@ -45,6 +47,33 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private var wakeLock: PowerManager.WakeLock? = null
 
+    // Vigia NATIVO contra travamento — diferente do vigia que já existe dentro
+    // do próprio JavaScript da página (que para de funcionar se o JS travar de
+    // vez). Esse aqui roda fora da WebView, manda um "ping" simples pra ela a
+    // cada minuto, e se não receber resposta por tempo demais, força a
+    // recriação da WebView — funciona mesmo se o motor JS estiver 100% travado.
+    private val handlerVigiaNativo = Handler(Looper.getMainLooper())
+    private var ultimaRespostaDaWebViewEm = System.currentTimeMillis()
+    private val INTERVALO_PING_MS = 60_000L
+    private val TEMPO_MAXIMO_SEM_RESPOSTA_MS = 3 * 60_000L
+    private val verificadorDeTravamento = object : Runnable {
+        override fun run() {
+            webView.evaluateJavascript("1+1") { _ -> ultimaRespostaDaWebViewEm = System.currentTimeMillis() }
+            val tempoSemResposta = System.currentTimeMillis() - ultimaRespostaDaWebViewEm
+            if(tempoSemResposta > TEMPO_MAXIMO_SEM_RESPOSTA_MS){
+                Log.e("SoundIndoorWatchdog", "WebView não responde há mais de ${tempoSemResposta/1000}s (mesmo a um ping simples) — recriando.")
+                recriarWebViewAposCrash()
+                ultimaRespostaDaWebViewEm = System.currentTimeMillis() // dá um tempo novo pra WebView recém-criada responder
+            }
+            handlerVigiaNativo.postDelayed(this, INTERVALO_PING_MS)
+        }
+    }
+    private fun iniciarVigiaNativo(){
+        ultimaRespostaDaWebViewEm = System.currentTimeMillis()
+        handlerVigiaNativo.removeCallbacks(verificadorDeTravamento) // evita duplicar o vigia se essa função for chamada de novo
+        handlerVigiaNativo.postDelayed(verificadorDeTravamento, INTERVALO_PING_MS)
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,6 +88,7 @@ class MainActivity : AppCompatActivity() {
         webView = findViewById(R.id.webView)
         configurarWebView()
         carregarUrlCorreta()
+        iniciarVigiaNativo()
     }
 
     // Decide sozinho qual URL abrir: se já tem um código de TV salvo de um
@@ -189,6 +219,7 @@ class MainActivity : AppCompatActivity() {
 
         configurarWebView()
         carregarUrlCorreta()
+        iniciarVigiaNativo() // reinicia o "relógio" do vigia pra WebView nova, dando tempo dela carregar antes de cobrar resposta
     }
 
     private fun ativarTelaCheiaImersiva() {
@@ -238,6 +269,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        handlerVigiaNativo.removeCallbacks(verificadorDeTravamento)
         wakeLock?.let { if (it.isHeld) it.release() }
         webView.destroy()
         super.onDestroy()
