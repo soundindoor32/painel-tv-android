@@ -7,6 +7,21 @@ android {
     namespace 'com.soundindoor.paineltv'
     compileSdk 34
 
+    // Chave de assinatura FIXA do projeto — sem isso, cada compilação nova no
+    // GitHub Actions gerava uma chave de teste ALEATÓRIA diferente, e o Android
+    // recusa instalar um app "por cima" de outro quando a assinatura não bate
+    // (proteção de segurança do próprio sistema). Com essa chave fixa, todo
+    // build a partir de agora usa sempre a MESMA assinatura, permitindo
+    // atualizar o app sem precisar desinstalar o anterior.
+    signingConfigs {
+        debug {
+            storeFile file("soundindoor-debug.keystore")
+            storePassword "soundindoor123"
+            keyAlias "soundindoor-debug"
+            keyPassword "soundindoor123"
+        }
+    }
+
     defaultConfig {
         applicationId "com.soundindoor.paineltv"
         minSdk 21
@@ -22,6 +37,7 @@ android {
         debug {
             minifyEnabled false
             debuggable true
+            signingConfig signingConfigs.debug
         }
     }
 
