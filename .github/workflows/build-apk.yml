@@ -20,6 +20,15 @@ jobs:
 
       - name: Preparar o Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # o pacote "tools" é antigo e foi descontinuado/removido dos
+          # servidores do Google — sem especificar isso aqui, a própria
+          # ação tenta instalar "tools platform-tools" por padrão, e a
+          # compilação inteira falha logo nessa etapa de preparação.
+          # platform-tools é tudo que essa etapa precisa fornecer; o
+          # Gradle baixa sozinho a plataforma/build-tools certos do
+          # projeto (compileSdk etc.) durante a compilação em si.
+          packages: "platform-tools"
 
       - name: Preparar o Gradle
         uses: gradle/actions/setup-gradle@v4
