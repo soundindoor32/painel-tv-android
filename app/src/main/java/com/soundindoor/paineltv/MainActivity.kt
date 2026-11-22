@@ -40,7 +40,7 @@ import androidx.appcompat.app.AppCompatActivity
  */
 class MainActivity : AppCompatActivity() {
 
-    private val urlBaseDoSistema = "https://soundindoor.duckdns.org"
+    private val urlBaseDoSistema = "https://tela.soundindoor.com.br"
     private val nomeArquivoPreferencias = "soundindoor_prefs"
     private val chaveCodigoTv = "codigo_tv_pareado"
 
